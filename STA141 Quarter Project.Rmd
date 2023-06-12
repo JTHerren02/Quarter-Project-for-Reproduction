@@ -1,0 +1,473 @@
+---
+title: "Neuron Activation and Animal Behavior"
+author: "JT Herren"
+date: "June 12, 2023"
+header-includes: \usepackage{enumerate,graphicx}
+geometry: margin=0.5in
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  titlepage: true
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment = NA)
+options(scipen = 999) #Remove the scientific notation
+```
+
+id: "919721771"
+
+
+**Abstract**: A brief summary of the project, including the objective and key findings.
+
+The main objective of this research is to create a predictive model that using the factors of neuron spikes and stimuli given to mice in order to predict if the mouse was successful in each trial. This data comes from an experiment done on 10 mice (we focus on 4) where they are given stimuli and rewarded for moving the highest contrast to directly in front of them. In this project, the exploratory analysis and data integration revealed significant variations among sessions in an experimental study. While the types of factors remained consistent, differences in mice, neurons, and contrasts introduced complexity to the data. We simplified this complexity by converting the data containing the neuron spikes into a single overall average for each trial. This information along with the differing stimuli was fit to a logistic model as those are good at predicting binary results of either success or failure. However, due to the simplification of the data the model was only able to predict results at around 70% success rate. These results made the limitations of these methods of both data simplification and the logistic model. The creation of this model did reach the objective despite its flaws. Additionally, the process of data exploration and the predictive modeling have made apparent ways to better improve this model through different forms of simplification that would include factors such as neuron type. This project was able to basically find a point on a roadmap to create a even better model to predict this complex data.
+
+**Section 1: Introduction**
+
+The objective of this project is to create a predictive model to investigate and analyze a study done on the neurons of mice given specific stimuli and choices. In this experiment, 10 male and female mice were chosen to be studied. These mice were surgically implanted with a steel head plate and recording chamber to record the reaction of different brain neurons reactions to various stimuli. In the experiment, the mice were placed in a plastic box with a wheel they could rotate. There were 3 screens on the left, right, and in front of the mice in which different levels of contrast would be shown in each trial. After the stimuli were shown the mouse is able to rotate the previously mentioned wheel to move the higher contrast to the middle screen. If they moved it correctly they were rewarded. There was a 50% chance of reward when moving the wheel when the screens were the same. They were also rewarded for not moving the wheel if no stimuli were shown. 
+
+**Section 2: Exploratory Analysis**
+
+
+<u>General Structure</u>
+
+Each session is composed of 8 different factors. The factors include the mouse that is being tested’s name, the date of the session, contrast left and right which shows the level of contrast on the left and right screen in the mouse’s box, feedback type shows whether or not the mouse moved the wheel correctly to move the higher contrast to the center 1 for success and -1 for failure, brain area is the area that the neuron is located, time represents the centers of the time bins/set time intervals for the study of the different neurons, and spks is numbers of spikes of neurons in the visual cortex in time bins in the previously defined time bins. Of the 18 sessions of interest only 4 mice participated in the experiment. Each trial has it's own spks grid that represents the activity/spikes of the different brain areas. Each row of the spks equates to a brain area and each column to a time bin. Our main factors of interest are feedback type, spks, and left/right stimuli.
+
+<u>Structure Across Sessions</u>
+
+```{r}
+directory = "C:/Users/JT Herren/Desktop/Desktop/College Files/2022-2023/Spring/STA 141/Data"
+file_list = list.files(directory)
+rds_files = file_list[grepl(".rds$", file_list, ignore.case = TRUE)]
+session <- list()
+for (i in seq_along(rds_files)) {
+  file_path <- file.path(directory, rds_files[i])
+  session[[i]] <- readRDS(file_path)
+}
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(tibble)
+library(knitr)
+```
+
+```{r, echo=FALSE}
+n.session=length(session)
+
+
+meta <- tibble(
+  session_number = 1:n.session,
+  mouse_name = rep('name', n.session),
+  date_exp = rep('dt', n.session),
+  n_brain_area = rep(0, n.session),
+  n_neurons = rep(0, n.session),
+  n_trials = rep(0, n.session),
+  success_rate = rep(0, n.session)
+)
+
+for(i in 1:n.session){
+  tmp <- session[[i]]
+  meta[i, 2] <- tmp$mouse_name
+  meta[i, 3] <- tmp$date_exp
+  meta[i, 4] <- length(unique(tmp$brain_area))
+  meta[i, 5] <- dim(tmp$spks[[1]])[1]
+  meta[i, 6] <- length(tmp$feedback_type)
+  meta[i, 7] <- mean(tmp$feedback_type + 1) / 2
+}
+
+kable(meta, format = "html", table.attr = "class='table table-striped'", digits = 2,
+      col.names = c("Session", "Mouse Name", "Experiment Date", "Neuron Types",
+                    "Total Neurons", "Trials", "Success Rate"))
+```
+
+**Describe the data structures across sessions.** (Session 19/20 is the test data)
+
+```{r, echo=F, eval=FALSE}
+mean(meta$n_trials)
+mean(meta$success_rate)
+sum(meta$n_trials)
+```
+From a numerical standpoint the sessions the trials range from 114 to 447 with the average amount of trials being around 282 trials. Most of the sessions appear to have not too drastically different trial counts except for a few exceptions such as session 1 which has the least number of results taking place 6 months before the following session. This would suggest the experiment was not completely polished at this point session 1 additionally has the lowest success rate. The mice Cori and Hench we tested in earlier sessions and then tested again at a later date. At the later date, the amount of neuron types increased and the number of neurons tested in total in the following sessions also increased. The mice Lederberg and Forssmann’s sessions were done in quick succession with Lederberg’s 7 sessions being done in the span of 6 days and Forssmann’s 4 sessions in the span of 5 days. This resulted in the type of neurons, number of tested neurons, and trial count not following the same pattern as the other mice of increasing the amount from the previous session of that mouse. The success rate as a result of the stimuli and feedback type differed across mice and sessions with Lederberg holding the top 3 highest success rates with Hench tying for the third highest success rate. Cori has the lowest average success rate while Lederberg has the highest success rate. Forssman’s average success rate is slightly higher than Henches with 0.6875 compared to 0.685. The overall average success rate across sessions is 0.7073974. All this information makes it apparent that each mouse and session is different in some respect.
+
+**Brain Activity**
+
+We are defining brain activity as spikes in the neurons being recorded. Every trial in each session shows brain activity through the spike train which show which brain areas are spiking at a specific time. We will be using the spikes as one of our predictive variables of feedback type
+
+**Exploring Homogeneity and Heterogeneity Across Sessions and Mice**
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+```
+
+**Mice**
+
+```{r, echo=FALSE}
+par(mfrow = c(2, 2))
+
+meta_sin_test <- meta %>% filter(session_number != 19 & session_number != 20) 
+
+#Success Rate over Mice
+plot_success <- ggplot(meta_sin_test, aes(x = mouse_name, y = success_rate, fill = mouse_name)) +
+  geom_boxplot() +
+  labs(x = "Mouse", y = "Success Rate") +
+  ggtitle("Success Rate Across Mice") +
+  guides(fill = "none")
+
+#Number of Trials over Mice
+plot_trials <- ggplot(meta_sin_test, aes(x = mouse_name, y = n_trials, fill = mouse_name)) +
+  geom_boxplot() +
+  labs(x = "Mouse", y = "Number of Trials") +
+  ggtitle("Number of Trials across Mice") +
+  guides(fill = "none")
+
+#Number of Brain Areas over Mice
+plot_neurons <- ggplot(meta_sin_test, aes(x = mouse_name, y = n_brain_area, fill = mouse_name)) +
+  geom_boxplot() +
+  labs(x = "Mouse", y = "Brain Areas") +
+  ggtitle("Neuron Types across Mice") +
+  guides(fill = "none")
+
+#Number of Neurons over Mice
+plot_tested_neurons <- ggplot(meta_sin_test, aes(x = mouse_name, y = n_neurons, fill = mouse_name)) +
+  geom_boxplot() +
+  labs(x = "Mouse", y = "Nuerons Tested") +
+  ggtitle("Neuron Tested across Mice") +
+  guides(fill = "none")
+
+grid.arrange(plot_success, plot_trials, plot_neurons, plot_tested_neurons, nrow = 2)
+
+
+```
+
+There does not appear to be any homogeneity across the 4 mice. The closest thing to homogeneity would be in the amount of brain areas study per mouse as the distribution for Cori and Forssmann are similar. However, overall there is a lack of homogeneity and a presence of heterogeneity across Mice.
+
+
+**Sessions**
+
+```{r, echo=FALSE}
+#Success Rate over Sessions
+plot_success <- ggplot(meta_sin_test, aes(x = session_number, y = success_rate, color = mouse_name)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Session", y = "Success Rate") +
+  ggtitle("Success Rate Across Sessions") +
+  geom_text(aes(label = date_exp), vjust = -0.5, hjust = 0.5, size = 2.5) +
+  theme(legend.position = "none")
+
+#Number of Trials over Sessions
+plot_trials <- ggplot(meta_sin_test, aes(x = session_number, y = n_trials, color = mouse_name)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Session", y = "Number of Trials") +
+  ggtitle("Number of Trials Across Sessions") +
+  geom_text(aes(label = date_exp), vjust = -0.5, hjust = 0.5, size = 2)
+
+#Number of Brain Areas over Sessions
+plot_neurons <- ggplot(meta_sin_test, aes(x = session_number, y = n_brain_area, color = mouse_name)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Session", y = "Number of Brain Areas") +
+  ggtitle("Neuron Types across Sessions") +
+  geom_text(aes(label = date_exp), vjust = -0.5, hjust = 0.5, size = 2.5) +
+  theme(legend.position = "none")
+
+#Number of Neurons over Sessions
+plot_tested_neurons <- ggplot(meta_sin_test, aes(x = session_number, y = n_neurons, color = mouse_name)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Session", y = "Number of Neurons") +
+  ggtitle("Number of Neurons Across Sessions") +
+  geom_text(aes(label = date_exp), vjust = -0.5, hjust = 0.5, size = 2.5) +
+  theme(legend.position = "none")
+
+grid.arrange(plot_success, plot_trials, plot_neurons, plot_tested_neurons, nrow = 2)
+```
+
+Based on the same metrics used to test homogeneity across mice for across sessions, there does appear to be some signs of homogeneity for some variables while others seem to lack it. Success rate and Neuron types appear to be more sporadic with a few clusters based on mouse and time of session. However, Number of neurons and number of trials appear to have a slight curve/pattern indicating the presence of some homogeneity. It still isn't perfect but across sessions appears to have more homogeneity than across Mice.
+
+
+
+**Section 3: Data Integration**
+
+In order to simplify the differences in size of spike trains and number of neurons being studies between sessions I will use the overall averages in order to simplify the spike train of each trial into a single number that can then be easily used as a predictor of the feedback type
+
+Average Overall Spike Counts Per Trial
+
+```{r}
+average_spike_value <- function(i.t, this_session) {
+  spk.trial <- this_session$spks[[i.t]]
+  spk.average <- mean(spk.trial)
+  return(spk.average)
+}
+```
+
+
+```{r, echo=FALSE}
+trial.summaries <- list()
+
+for (i.s in 1:(length(session)-2)) {
+  n.trial <- length(session[[i.s]]$feedback_type)
+
+  trial.summary <- matrix(nrow = n.trial, ncol = 5)
+  for (i.t in 1:n.trial) {
+    trial.summary[i.t, ] <- c(average_spike_value(i.t, this_session = session[[i.s]]),
+                              session[[i.s]]$feedback_type[i.t],
+                              session[[i.s]]$contrast_left[i.t],
+                              session[[i.s]]$contrast_right[i.t],
+                              i.t)
+  }
+  
+  colnames(trial.summary) <- c("average_spike_value", "feedback_type", "contrast_left", "contrast_right", "id")
+  
+  trial.summaries[[i.s]] <- trial.summary
+}
+
+
+trial.summary <- do.call(rbind, trial.summaries)
+
+head(trial.summary)
+print("Summary")
+summary(trial.summary)
+
+```
+Another way of simplifying the data is taking the average of the average spike count for each neuron in the spike train for each trial. I want to see if this method of aggregation will be any different to the overall average data.
+
+Average of Average Spike Counts Per Trial
+
+```{r}
+average_avgspike <- function(i.t, this_session) {
+  spk.trial <- this_session$spks[[i.t]]
+  area <- this_session$brain_area
+  spk.count <- apply(spk.trial, 1, sum)
+  spk.average.tapply <- mean(tapply(spk.count, area, mean))
+  return(spk.average.tapply)
+}
+```
+
+```{r, echo=FALSE}
+trial.2.summaries <- list()
+
+for (i.s in 1:(length(session)-2)) {
+  n.trial <- length(session[[i.s]]$feedback_type)
+
+  trial.2.summary <- matrix(nrow = n.trial, ncol = 5)
+  for (i.t in 1:n.trial) {
+    trial.2.summary[i.t, ] <- c(average_avgspike(i.t, this_session = session[[i.s]]),
+                              session[[i.s]]$feedback_type[i.t],
+                              session[[i.s]]$contrast_left[i.t],
+                              session[[i.s]]$contrast_right[i.t],
+                              i.t)
+  }
+  
+  colnames(trial.2.summary) <- c("average_spike_value", "feedback_type", "contrast_left", "contrast_right", "id")
+  
+  trial.2.summaries[[i.s]] <- trial.2.summary
+}
+
+
+trial.2.summary <- do.call(rbind, trial.2.summaries)
+
+head(trial.2.summary)
+print("Summary")
+summary(trial.2.summary)
+
+```
+
+
+**Section 4: Predictive Modeling**
+
+I will be building a logistic model with training data that is made up of a randomly chosen 70% of the data created in the data integration section. In order to determine a preliminary success rate before the test data is released, which we will then run through the predictive model. Additionally I will be doing two logistic models for each method of data aggregation I proposed earlier. In order for the data to be read I will be changing -1 to 0 so from now on 1 = success and 0 = failure
+
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+library(MASS)
+```
+
+**Overall Average Spike Count Per Trial Model**
+
+```{r}
+set.seed(125)
+
+train_ratio <- 0.7
+
+n_train <- round(train_ratio * nrow(trial.summary))
+n_test <- nrow(trial.summary) - n_train
+
+shuffled_indices <- sample(nrow(trial.summary))
+
+train_data1 <- trial.summary[shuffled_indices[1:n_train], ]
+test_data1 <- trial.summary[shuffled_indices[(n_train + 1):nrow(trial.summary)], ]
+```
+
+**Logistic Model**
+
+```{r}
+train_data1 <- as.data.frame(train_data1)
+train_data1$feedback_type <- ifelse(train_data1$feedback_type == -1, 0, train_data1$feedback_type)
+Avg_model <- glm(feedback_type ~ average_spike_value + contrast_left * contrast_right, data = train_data1, family = "binomial")
+```
+
+```{r, echo=FALSE}
+test_data1 <- as.data.frame(test_data1)
+test_data1$feedback_type <- ifelse(test_data1$feedback_type == -1, 0, test_data1$feedback_type)
+predictions_avg <- predict(Avg_model, newdata = test_data1, type = "response")
+binary_predictions <- ifelse(predictions_avg > 0.5, "1","0")
+```
+
+Confusion Matrix
+
+```{r, echo=FALSE}
+confusion_matrix <- table(test_data1$feedback_type, binary_predictions)
+confusion_matrix
+```
+Missclassification Rate
+
+```{r, echo=FALSE}
+misclassification_rate = 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+misclassification_rate
+```
+
+**Average of Average Spike Counts Model**
+
+```{r}
+set.seed(125)
+
+n_train <- round(train_ratio * nrow(trial.2.summary))
+n_test <- nrow(trial.2.summary) - n_train
+
+shuffled_indices <- sample(nrow(trial.2.summary))
+
+train_data2 <- trial.2.summary[shuffled_indices[1:n_train], ]
+test_data2 <- trial.2.summary[shuffled_indices[(n_train + 1):nrow(trial.2.summary)], ]
+```
+
+**Logistic Model**
+
+```{r}
+train_data2 <- as.data.frame(train_data2)
+train_data2$feedback_type <- ifelse(train_data2$feedback_type == -1, 0, train_data2$feedback_type)
+Avg2_model <- glm(feedback_type ~ average_spike_value + contrast_left * contrast_right, data = train_data2, family = "binomial")
+```
+
+```{r, echo=FALSE}
+test_data2 <- as.data.frame(test_data2)
+test_data2$feedback_type <- ifelse(test_data2$feedback_type == -1, 0, test_data2$feedback_type)
+predictions_avg <- predict(Avg2_model, newdata = test_data2, type = "response")
+binary_predictions <- ifelse(predictions_avg > 0.5, "1","0")
+```
+
+Confusion Matrix
+
+```{r, echo=FALSE}
+confusion_matrix <- table(test_data2$feedback_type, binary_predictions)
+confusion_matrix
+```
+Missclassification Rate
+
+```{r, echo=FALSE}
+misclassification_rate = 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+misclassification_rate
+```
+Both models had similar results with a missclassification rate of 29.26509% showing that both forms of aggregating the data I performed found similar distributions despite the specific values being different. This would suggest either could be used while the overall average could be good for interpreting feedback based on overall activity while the average of the average spike levels for each neuron type could possibly be used to interpret specific brain areas effect on feedback
+
+
+
+
+
+
+**Section 5: Prediction Performance on the Test Sets**
+
+I will first be putting the test data into the same data format as my training data and since both models I tested had the same result I will be using the overall average spike count method to aggregate the data for the model with the test set. In order to make the data more readable I will be putting both test data into the same fram but will be testing each individually.
+
+```{r, echo=FALSE}
+final.summaries <- list()
+
+for (i.s in 19:20) {
+  n.trial <- length(session[[i.s]]$feedback_type)
+
+  final_summary <- matrix(nrow = n.trial, ncol = 5)
+  for (i.t in 1:n.trial) {
+    final_summary[i.t, ] <- c(average_spike_value(i.t, this_session = session[[i.s]]),
+                              session[[i.s]]$feedback_type[i.t],
+                              session[[i.s]]$contrast_left[i.t],
+                              session[[i.s]]$contrast_right[i.t],
+                              i.t)
+  }
+  
+  colnames(final_summary) <- c("average_spike_value", "feedback_type", "contrast_left", "contrast_right", "id")
+  
+  final.summaries[[i.s]] <- final_summary
+}
+
+final_summary <- do.call(rbind, final.summaries)
+
+head(final_summary)
+print("Summary")
+summary(final_summary)
+```
+
+**Data Based on Session 1**
+
+```{r}
+final_data1 <- final_summary[1:100, ]
+final_data1 <- as.data.frame(final_data1)
+final_data1$feedback_type <- ifelse(final_data1$feedback_type == -1, 0, final_data1$feedback_type)
+```
+
+```{r}
+predictions_avg <- predict(Avg_model, newdata = final_data1, type = "response")
+binary_predictions <- ifelse(predictions_avg > 0.5, "1","0")
+```
+
+Confusion Matrix
+
+```{r, echo=FALSE}
+confusion_matrix <- table(final_data1$feedback_type, binary_predictions)
+confusion_matrix
+```
+Missclassification Rate
+
+```{r, echo=FALSE}
+misclassification_rate = 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+misclassification_rate
+```
+
+**Data Based on Session 18**
+
+```{r}
+final_data2 <- final_summary[101:200, ]
+final_data2 <- as.data.frame(final_data2)
+final_data2$feedback_type <- ifelse(final_data2$feedback_type == -1, 0, final_data2$feedback_type)
+```
+
+```{r}
+predictions_avg <- predict(Avg_model, newdata = final_data2, type = "response")
+binary_predictions <- ifelse(predictions_avg > 0.5, "1","0")
+```
+
+Confusion Matrix
+
+```{r, echo=FALSE}
+confusion_matrix <- table(final_data1$feedback_type, binary_predictions)
+confusion_matrix
+```
+Missclassification Rate
+
+```{r, echo=FALSE}
+misclassification_rate = 1 - sum(diag(confusion_matrix)) / sum(confusion_matrix)
+misclassification_rate
+```
+My logistic model trained on the sessions was consistent in its ability to predict the results of each test data with it being 73% successful in it's ability to predict success and failure
+
+**Section 6: Discussion**
+
+During the exploratory analysis and data integration one fact that became very apparent is that every session of this experiment had many differences. While the types of factors were the same, the differences in the mice being studied, the neurons being studied, and the contrasts given to the mice are what makes this data unique. However, they are also what makes the data so complex. There was an attempt to simplify this data into a format that could be applied to a predictive model. I was successful in this process, but the data I created ignored one major factor in each data which is neuron types due to averaging the neuron spikes. The model I created was still relatively successful with both test data having 73% success. While that success rate is still better than randomly assigning success and failure it makes the limitations of my methods very apparent. I would say the major sources of error in my model are the simplification of such a complex data form. Through only focusing on specific factors such as average brain area spikes and stimuli levels there were many factors that were ignored, which could have helped in the predictive process. Even the factor that I didn't ignore, the spike train, I simplified by making them into a single average. As a result of the limitations of my skills, this was the best possible outcome. Fortunately, the analysis of the data and creation of the logistic model is part of the roadmap to improve the process of predicting the results of the mice experiment. Some methods of improvement include the use of ignored factors such as the time at which neurons spiked or finding a model that could use multiple numbers per trial as a predictor better than the logistic model. This would allow the use of the individual averages of each neuron in the prediction process. Essentially, improvement would come through fewer or different forms of simplification
+
+# R Appendix
+
+```{r, ref.label=knitr::all_labels(), eval = F, echo = T}
+
+```
